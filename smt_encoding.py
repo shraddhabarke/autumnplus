@@ -15,14 +15,13 @@ class State:
 def fixed_num_states_encode(
         trace: list[Transition], max_states: int
         ) -> Tuple[Solver, Optional[list[State]]]:
-    s = Solver()
+    s = Optimize()
     N = len(trace)
 
     # Define the states
     states = [Int(f'state_{i}') for i in range(N+1)]
     for st in states:
-        s.add(0 <= st, st < max_states)
-
+        s.add(0 <= st, st < max_states)   # size constraints, iteratively increases max_states if unsat
     # Symmetry-breaking
     s.add(states[0] == 0)
     for i, j in itertools.product(range(1, N+1), range(1, max_states)):
@@ -40,17 +39,27 @@ def fixed_num_states_encode(
 
     # Define the transition and output functions
     Z = IntSort()
+    predDict = {}
     Preds = BitVecSort(len(trace[0].bits))
     transition_fn = Function('T', Z, Preds, Z)
     output_fn = Function('O', Z, Preds, Z)
     for i in range(N):
         preds = functools.reduce(lambda x, y: 2*x + y, trace[i].bits)
         s.add(transition_fn(states[i], preds) == states[i+1])
+        if preds not in predDict: predDict[preds] = [i]
+        else: predDict[preds].append(i)
         s.add(output_fn(states[i], preds) == actions[i])
+
+    # constraints to behave similarly under same predicates
+    for v in predDict.values():
+        for i in range(len(v)):
+            for j in range(i + 1, len(v)):
+                s.add_soft((states[v[i]] == states[v[i]+1]) == (states[v[j]] == states[v[j]+1]))
 
     # Check the model
     if s.check() == unsat:
         return s, None
+
     m = s.model()
     result = [State(i, {}) for i in range(max_states)]
     s_val = lambda i: m[states[i]].as_long()
@@ -84,4 +93,3 @@ if __name__ == '__main__':
     trace = read_trace('gravity_i', 5)[2:]
     states = solve(trace)
     print(dot(states))
-
