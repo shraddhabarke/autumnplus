@@ -20,6 +20,7 @@ import functools, operator, math
 
 class DT:
     def debug_print(self, prefix=''): raise NotImplementedError
+    def size(self) -> int: raise NotImplementedError
 
 @dataclass
 class DTBranch:
@@ -30,6 +31,7 @@ class DTBranch:
         print(f'{prefix}Split on {self.pred}:')
         for c in self.children:
             c.debug_print(prefix=prefix+'  ')
+    def size(self) -> int: return 1 + sum(c.size() for c in self.children)
 
 @dataclass
 class DTLeaf:
@@ -41,10 +43,21 @@ class DTLeaf:
             print(f'{prefix}Output {val}')
         else:
             print(f'{prefix}Output any from {self.value}')
+    def size(self) -> int: return 1
+
+@dataclass
+class DTUnreachable:
+    def debug_print(self, prefix=''):
+        print(f'{prefix}UNREACHABLE (no data)')
+    def size(self) -> int: return 0
 
 ObsTable = list[tuple[dict[str, int], set[str]]]
 
 def infer(preds: dict[str, int], obs: ObsTable) -> DT:
+    # Base case: no data
+    if len(obs) == 0:
+        return DTUnreachable()
+
     # Base case: look for a common output value
     common = functools.reduce(operator.and_, (out for data, out in obs))
     if len(common) > 0:
