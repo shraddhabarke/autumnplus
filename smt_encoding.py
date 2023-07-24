@@ -14,7 +14,10 @@ class State:
 
 def fixed_num_states_encode(
         trace: list[Transition], max_states: int
-        ) -> Tuple[Solver, Optional[list[State]]]:
+        ) -> Tuple[Solver, Optional[list[int]]]:
+    '''
+    Returns a solver and a list of N+1 integer state IDs
+    '''
     s = Optimize()
     N = len(trace)
 
@@ -59,29 +62,31 @@ def fixed_num_states_encode(
     # Check the model
     if s.check() == unsat:
         return s, None
+    model = s.model()
+    return s, [model[st].as_long() for st in states]
 
-    m = s.model()
-    result = [State(i, {}) for i in range(max_states)]
-    s_val = lambda i: m[states[i]].as_long()
+def solve(trace: list[Transition]) -> list[int]:
+    for max_states in itertools.count(1):
+        s, states = fixed_num_states_encode(trace, max_states)
+        if states is not None: return states
+
+def make_evidence_automaton(
+        trace: list[Transition], num_states: int, states: list[int]
+        ) -> list[State]:
+    result = [State(i, {}) for i in range(num_states)]
     for i, t in enumerate(trace):
         preds = tuple(t.bits)
-        start = result[s_val(i)]
+        start = result[states[i]]
         if preds in start.trans:
             start.trans[preds][0].intersection_update(t.possible_actions)
         else:
-            start.trans[preds] = t.possible_actions, s_val(i+1)
-    return s, result
+            start.trans[preds] = t.possible_actions, states[i+1]
+    return result
 
-
-def solve(trace: list[Transition]) -> list[State]:
-    for i in itertools.count():
-        s, states = fixed_num_states_encode(trace, i)
-        if states is not None: return states
-
-def dot(states: list[State]) -> str:
+def dot(evidence_automaton: list[State]) -> str:
     pred_memo = {}
-    out = 'digraph sfdjlksdfljksdfjlkdfs {'
-    for s in states:
+    out = 'digraph sfdjlksdfljksdfjlkdfs {\n'
+    for s in evidence_automaton:
         for pred, (r, next_state) in s.trans.items():
             if pred not in pred_memo: pred_memo[pred] = len(pred_memo)
             out += f'  {s.state_id} -> {next_state} '
@@ -92,4 +97,6 @@ def dot(states: list[State]) -> str:
 if __name__ == '__main__':
     trace = read_trace('gravity_i', 5)[2:]
     states = solve(trace)
-    print(dot(states))
+    num_states = max(states) + 1  # Hacky
+    evidence_automaton = make_evidence_automaton(trace, num_states, states)
+    print(dot(evidence_automaton))
