@@ -12,7 +12,7 @@ class BigDT:
     def size(self) -> int:
         return self.output_dt.size() + self.next_state_dt.size()
     def debug_print(self):
-        print(f'There are {self.num_states} states')
+        print(f'There are {self.num_states} states and {self.size()} decision tree nodes')
         print('Output decision tree:')
         self.output_dt.debug_print(prefix='  ')
         print('Next state decision tree:')

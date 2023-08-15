@@ -22,7 +22,8 @@ def fixed_num_states_encode(
 
     # Symmetry-breaking
     s.add(states[0] == 0)
-    for i, j in itertools.product(range(1, N+1), range(1, max_states)):
+    MAX_SYMMETRY_BREAKING = 40
+    for i, j in itertools.product(range(1, min(MAX_SYMMETRY_BREAKING, N+1)), range(1, max_states)):
         s.add(Not(And(states[i] == j, *(s != j-1 for s in states[:i]))))
 
     # Define the actions
@@ -45,13 +46,12 @@ def fixed_num_states_encode(
         s.add(transition_fn(states[i], preds) == states[i+1])
         s.add(output_fn(states[i], preds) == actions[i])
 
-    return s, states
+    # Extra constraint: when nothing at all happens, the state does not change
+    null_event = 0  # Is this right? Seems like it
+    for st in states:
+        s.add(transition_fn(st, null_event) == st)
 
-    # Check the model
-    if s.check() == unsat:
-        return s, None
-    model = s.model()
-    return s, [model[st].as_long() for st in states]
+    return s, states
 
 def solve_all(trace: list[Transition]) -> Iterator[list[int]]:
     '''
@@ -62,6 +62,8 @@ def solve_all(trace: list[Transition]) -> Iterator[list[int]]:
         s, states = fixed_num_states_encode(trace, max_states)
         if s.check() == sat:
             break
+
+    print(f'There are {max_states} states')
 
     # Enumerate all models
     while s.check() == sat:

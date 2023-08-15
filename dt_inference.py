@@ -126,5 +126,5 @@ if __name__ == '__main__':
                (2, 1, 1, 1, 'N'),
            ]]
     dt = infer(preds, obs)
-    print(dt)
+    dt.debug_print()
 
