@@ -163,17 +163,23 @@ def set_cover_lower_bound(items: Iterable[set[str]]) -> int:
 
     return num_representatives
 
-def branch_and_bound(preds: dict[str, int], obs: ObsTable, upper_bound = None) -> list[DT]:
+def branch_and_bound(
+        preds: dict[str, int], obs: ObsTable, upper_bound = math.inf
+        ) -> list[DT]:
     pred_list = list(preds.keys())
 
-    # Actually this should return a list I think
     def go(depth: int, upper_bound: int, lo: int, hi: int) -> list[DT]:
-        # print('Trying', lo, 'to', hi, 'with the upper bound', upper_bound)
-        # print('  (It previously split on', pred_list[:depth], ')')
+        '''
+        Internal recursive helper function. Find all decision trees with:
+         - size at most upper_bound
+         - using predicates from pred_list[depth:]
+         - matching observations in obs[lo:hi]
 
+        The recursive algorithm modifies (reorders) both obs and pred_list
+        in-place.
+        '''
         # Base case: upper bound is too low
         if upper_bound <= 0:
-            # print('After splitting on', pred_list[:depth], 'the upper bound is too low')
             return []
 
         # Base case: no data
@@ -183,7 +189,6 @@ def branch_and_bound(preds: dict[str, int], obs: ObsTable, upper_bound = None) -
         # Base case: look for a common output value
         common = functools.reduce(operator.and_, (obs[i][1] for i in range(lo, hi)))
         if len(common) > 0:
-            # print('After splitting on', pred_list[:depth], 'found the common things', common)
             return [DTLeaf(common)]
 
         dts_size_equal_upper_bound: list[DT] = []
@@ -235,8 +240,6 @@ def branch_and_bound(preds: dict[str, int], obs: ObsTable, upper_bound = None) -
 
         return dts_size_equal_upper_bound
 
-    if upper_bound is None:
-        upper_bound = math.inf
     upper_bound = min(upper_bound, heuristic_infer(preds, obs).size)
     return go(0, upper_bound, 0, len(obs))
 
