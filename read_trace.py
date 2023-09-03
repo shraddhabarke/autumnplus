@@ -30,4 +30,5 @@ def read_trace(name: str, obj_id: int) -> list[Transition]:
     preds = [process_pred(l) for l in csv.reader(open(f'traces/{name}predicate.csv'), dialect) if process_pred(l) is not None]
     return list(map(lambda actions, *bits: Transition(actions, list(bits)), actions, *preds))
 
-print(read_trace('paint', 7))
+if __name__ == '__main__':
+    print(read_trace('paint', 7))

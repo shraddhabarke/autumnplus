@@ -74,8 +74,20 @@ def solve_all(trace: list[Transition]) -> Iterator[list[int]]:
 
 if __name__ == '__main__':
     trace = read_trace('gravity_i', 5)[2:]
-    dt = min((big_dt(trace, max(s)+1, s) for s in solve_all(trace)),
-             key=lambda dt: dt.size())
+    best = []
+    best_size = math.inf
+    for s in solve_all(trace):
+        num_states = max(s) + 1
 
-    dt.debug_print()
+        dts = big_dt(trace, num_states, s, upper_bound = best_size)
+        if len(dts) == 0: continue
+        if dts[0].size() < best_size:
+            best.clear()
+            best_size = dts[0].size()
+        best.extend(dts)
+
+    print(f'Overall, there are {len(best)} many minimal decision trees')
+    for dt in best:
+        print(60*'-')
+        dt.debug_print()
 
