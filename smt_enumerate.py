@@ -1,6 +1,5 @@
 from typing import *
-import functools
-import itertools
+import functools, itertools, math
 
 from read_trace import read_trace, Transition
 from big_dt import big_dt
@@ -73,21 +72,28 @@ def solve_all(trace: list[Transition]) -> Iterator[list[int]]:
         s.add(Or(*(st != val for st, val in zip(states, assignment))))
 
 if __name__ == '__main__':
+    import time
     trace = read_trace('gravity_i', 5)[2:]
-    best = []
-    best_size = math.inf
-    for s in solve_all(trace):
-        num_states = max(s) + 1
 
-        dts = big_dt(trace, num_states, s, upper_bound = best_size)
-        if len(dts) == 0: continue
-        if dts[0].size() < best_size:
-            best.clear()
-            best_size = dts[0].size()
-        best.extend(dts)
+    state_assignments = list(solve_all(trace))
 
-    print(f'Overall, there are {len(best)} many minimal decision trees')
-    for dt in best:
-        print(60*'-')
-        dt.debug_print()
+    overall_start = time.time()
+    COUNT = 100
+    for i in range(COUNT):
+        start = time.time()
+        best = None
+        best_size = math.inf
+        for s in state_assignments:
+            num_states = max(s) + 1
+
+            dt = big_dt(trace, num_states, s, upper_bound = best_size)
+            if dt is None: continue
+            assert dt.size() < best_size
+            best = dt
+            best_size = dt.size()
+        duration = time.time() - start
+        print(f'This iteration took {duration} secs')
+    print(f'The average time was {(time.time() - overall_start)/COUNT}')
+
+    best.debug_print()
 

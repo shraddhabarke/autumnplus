@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from collections import Counter, defaultdict
 import functools, itertools, operator, math, copy
 
+###### Decision trees
+
 class DT:
     '''The size of a decision tree is the number of its leaves'''
     size: int
@@ -56,7 +58,11 @@ class DTUnreachable(DT):
     def debug_print(self, prefix=''):
         print(f'{prefix}UNREACHABLE (no data)')
 
+
 ObsTable = list[tuple[dict[str, int], set[str]]]
+
+
+###### Pure heuristic search with the information gain heuristic
 
 def heuristic_infer(preds: dict[str, int], obs: ObsTable) -> DT:
     # Base case: no data
@@ -163,15 +169,82 @@ def set_cover_lower_bound(items: Iterable[set[str]]) -> int:
 
     return num_representatives
 
+def remove_irrelevant_predicates(preds: dict[str, int], obs: ObsTable):
+    '''
+    Delete any predicates that always take the same value
+    '''
+    if len(obs) == 0:
+        preds.clear(); return
+
+    for pred in list(preds.keys()):
+        value = obs[0][0][pred]
+        if all(p[pred] == value for p, __ in obs):
+            del preds[pred]
+
+def find_dependent_predicates(
+        preds: dict[str, int], obs: ObsTable
+        ) -> dict[str, list[str]]:
+    '''
+    Preprocessing for equivalence reduction: find size-2 clauses that are true
+    in all observations
+    Only for binary predicates, for now
+
+    Returns a list of pairs (A, B) such that (value of A, value of B) does not
+    take on all four distict values 00, 01, 10, 11
+
+    (Then it suffices to never branch on A after having already branched on B)
+    '''
+
+    # Only binary predicates for now
+    pred_list = [p for p, arity in preds.items() if arity == 2]
+
+    result = defaultdict(lambda: [])
+
+    for i in range(1, len(pred_list)):
+        pred = pred_list[i]
+
+        # Partition obs on pred
+        lo, hi = 0, len(obs)
+        while lo < hi:
+            while lo < hi and obs[lo][0][pred] == 0:
+                lo += 1
+            while lo < hi and obs[hi-1][0][pred] == 1:
+                hi -= 1
+            if lo < hi:
+                obs[lo], obs[hi-1] = obs[hi-1], obs[lo]
+                lo += 1
+                hi -= 1
+        mid = lo
+        assert lo == mid == hi
+        assert 0 < mid < len(obs)
+
+        # Find predicates constant on one of the halves
+        for pred2 in pred_list[:i]:
+            val = obs[0][0][pred2]
+            if all(obs[j][0][pred2] == val for j in range(mid)):
+                result[pred2].append(pred)
+                continue
+
+            val = obs[mid][0][pred2]
+            if all(obs[j][0][pred2] == val for j in range(mid, len(obs))):
+                result[pred2].append(pred)
+
+    return result
+
 def branch_and_bound(
         preds: dict[str, int], obs: ObsTable, upper_bound = math.inf
-        ) -> list[DT]:
+        ) -> DT | None:
+    remove_irrelevant_predicates(preds, obs)
     pred_list = list(preds.keys())
 
-    def go(depth: int, upper_bound: int, lo: int, hi: int) -> list[DT]:
+    dependent_preds = find_dependent_predicates(preds, obs)
+
+    branched_on_so_far = {pred: False for pred in preds}
+
+    def go(depth: int, upper_bound: int, lo: int, hi: int) -> DT | None:
         '''
-        Internal recursive helper function. Find all decision trees with:
-         - size at most upper_bound
+        Internal recursive helper function. Find a decision tree with:
+         - size strictly less than upper_bound
          - using predicates from pred_list[depth:]
          - matching observations in obs[lo:hi]
 
@@ -179,24 +252,31 @@ def branch_and_bound(
         in-place.
         '''
         # Base case: upper bound is too low
-        if upper_bound <= 0:
-            return []
+        if upper_bound <= 1:
+            return None
 
         # Base case: no data
         if lo == hi:
-            return [DTUnreachable()]
+            return DTUnreachable()
 
         # Base case: look for a common output value
         common = functools.reduce(operator.and_, (obs[i][1] for i in range(lo, hi)))
         if len(common) > 0:
-            return [DTLeaf(common)]
+            return DTLeaf(common)
 
-        dts_size_equal_upper_bound: list[DT] = []
+        best_so_far: DT | None = None
 
         # Pick a predicate from predicate list
         for pred_index in range(depth, len(pred_list)):
             pred = pred_list[pred_index]
+
+            if any(branched_on_so_far[p2] for p2 in dependent_preds[pred]):
+                # Equivalence reduction: skip this one
+                continue
+
             pred_list[depth], pred_list[pred_index] = pred, pred_list[depth]
+            assert not branched_on_so_far[pred]
+            branched_on_so_far[pred] = True
 
             # Sort the range on that predicate
             endpts: list[int] = []
@@ -212,36 +292,41 @@ def branch_and_bound(
 
             # Recurse on each range
             size_so_far = 0
-            solns: list[list[DT]] = []
+            children: list[DT] = []
             lo_ = lo
             for i, hi_ in enumerate(endpts):
                 result = go(depth + 1, upper_bound - size_so_far - sum(bounds[i+1:]), lo_, hi_)
-                if len(result) == 0:
-                    solns = None
+                if result is None:
+                    children = None
                     break
-                size_so_far += result[0].size
-                solns.append(result)
+                size_so_far += result.size
+                children.append(result)
                 lo_ = hi_
 
             # Assemble into overall solutions
-            if solns is not None:
+            if children is not None:
                 assert lo_ == hi
-                assert size_so_far <= upper_bound
+                assert size_so_far < upper_bound
+                best_so_far = DTBranch(pred, tuple(children))
+                upper_bound = size_so_far
 
-                if size_so_far < upper_bound:
-                    dts_size_equal_upper_bound.clear()
-                    upper_bound = size_so_far
-
-                dts_size_equal_upper_bound.extend(
-                        DTBranch(pred, children)
-                        for children in itertools.product(*solns))
-
+            branched_on_so_far[pred] = False
             pred_list[depth], pred_list[pred_index] = pred_list[pred_index], pred
 
-        return dts_size_equal_upper_bound
+        return best_so_far
 
-    upper_bound = min(upper_bound, heuristic_infer(preds, obs).size)
-    return go(0, upper_bound, 0, len(obs))
+    if upper_bound < math.inf:
+        lower_bound = lower_bound_on_dt_size(obs, 0, len(obs))
+        if lower_bound >= upper_bound:
+            return None
+    heuristic_best = heuristic_infer(preds, obs)
+    dt = go(0, min(upper_bound, heuristic_best.size), 0, len(obs))
+    if dt is not None:
+        return dt
+    elif heuristic_best.size < upper_bound:
+        return heuristic_best
+    else:
+        return None
 
 def sort_range_pred_vals(
         obs: ObsTable, lo: int, hi: int, pred: str, pred_lo: int, pred_hi: int,
@@ -299,7 +384,7 @@ if __name__ == '__main__':
     dt = heuristic_infer(preds, obs)
     dt.debug_print()
 
-    others = branch_and_bound(preds, obs)
-    for dt in others:
-        dt.debug_print()
+    dt = branch_and_bound(preds, obs)
+    assert dt is not None
+    dt.debug_print()
 
