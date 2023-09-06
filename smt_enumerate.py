@@ -81,19 +81,24 @@ if __name__ == '__main__':
     COUNT = 100
     for i in range(COUNT):
         start = time.time()
-        best = None
+        best = []
         best_size = math.inf
         for s in state_assignments:
             num_states = max(s) + 1
 
-            dt = big_dt(trace, num_states, s, upper_bound = best_size)
-            if dt is None: continue
-            assert dt.size() < best_size
-            best = dt
-            best_size = dt.size()
+            dts = big_dt(trace, num_states, s, upper_bound = best_size)
+            if len(dts) == 0: continue
+            assert dts[0].size() <= best_size
+            if dts[0].size() < best_size:
+                best.clear()
+                best_size = dts[0].size()
+            best.extend(dts)
         duration = time.time() - start
         print(f'This iteration took {duration} secs')
     print(f'The average time was {(time.time() - overall_start)/COUNT}')
 
-    best.debug_print()
+    print(f'Overall, there are {len(best)} many minimal decision trees')
+    for dt in best:
+        print(60*'-')
+        dt.debug_print()
 

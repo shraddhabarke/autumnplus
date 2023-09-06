@@ -233,7 +233,7 @@ def find_dependent_predicates(
 
 def branch_and_bound(
         preds: dict[str, int], obs: ObsTable, upper_bound = math.inf
-        ) -> DT | None:
+        ) -> list[DT]:
     remove_irrelevant_predicates(preds, obs)
     pred_list = list(preds.keys())
 
@@ -241,7 +241,7 @@ def branch_and_bound(
 
     branched_on_so_far = {pred: False for pred in preds}
 
-    def go(depth: int, upper_bound: int, lo: int, hi: int) -> DT | None:
+    def go(depth: int, upper_bound: int, lo: int, hi: int) -> list[DT]:
         '''
         Internal recursive helper function. Find a decision tree with:
          - size strictly less than upper_bound
@@ -252,19 +252,19 @@ def branch_and_bound(
         in-place.
         '''
         # Base case: upper bound is too low
-        if upper_bound <= 1:
-            return None
+        if upper_bound <= 0:
+            return []
 
         # Base case: no data
         if lo == hi:
-            return DTUnreachable()
+            return [DTUnreachable()]
 
         # Base case: look for a common output value
         common = functools.reduce(operator.and_, (obs[i][1] for i in range(lo, hi)))
         if len(common) > 0:
-            return DTLeaf(common)
+            return [DTLeaf(common)]
 
-        best_so_far: DT | None = None
+        best_so_far: list[DT] = []
 
         # Pick a predicate from predicate list
         for pred_index in range(depth, len(pred_list)):
@@ -292,23 +292,25 @@ def branch_and_bound(
 
             # Recurse on each range
             size_so_far = 0
-            children: list[DT] = []
+            children: list[list[DT]] = []
             lo_ = lo
             for i, hi_ in enumerate(endpts):
                 result = go(depth + 1, upper_bound - size_so_far - sum(bounds[i+1:]), lo_, hi_)
-                if result is None:
+                if len(result) == 0:
                     children = None
                     break
-                size_so_far += result.size
+                size_so_far += result[0].size
                 children.append(result)
                 lo_ = hi_
 
             # Assemble into overall solutions
             if children is not None:
                 assert lo_ == hi
-                assert size_so_far < upper_bound
-                best_so_far = DTBranch(pred, tuple(children))
-                upper_bound = size_so_far
+                assert size_so_far <= upper_bound
+                if size_so_far < upper_bound:
+                    best_so_far.clear()
+                    upper_bound = size_so_far
+                best_so_far.extend(DTBranch(pred, cs) for cs in itertools.product(*children))
 
             branched_on_so_far[pred] = False
             pred_list[depth], pred_list[pred_index] = pred_list[pred_index], pred
@@ -317,16 +319,10 @@ def branch_and_bound(
 
     if upper_bound < math.inf:
         lower_bound = lower_bound_on_dt_size(obs, 0, len(obs))
-        if lower_bound >= upper_bound:
-            return None
+        if lower_bound > upper_bound:
+            return []
     heuristic_best = heuristic_infer(preds, obs)
-    dt = go(0, min(upper_bound, heuristic_best.size), 0, len(obs))
-    if dt is not None:
-        return dt
-    elif heuristic_best.size < upper_bound:
-        return heuristic_best
-    else:
-        return None
+    return go(0, min(upper_bound, heuristic_best.size), 0, len(obs))
 
 def sort_range_pred_vals(
         obs: ObsTable, lo: int, hi: int, pred: str, pred_lo: int, pred_hi: int,
@@ -384,7 +380,9 @@ if __name__ == '__main__':
     dt = heuristic_infer(preds, obs)
     dt.debug_print()
 
-    dt = branch_and_bound(preds, obs)
-    assert dt is not None
-    dt.debug_print()
+    dts = branch_and_bound(preds, obs)
+    print(f'There are {len(dts)} best decision trees')
+    for dt in dts:
+        print(60*'-')
+        dt.debug_print()
 

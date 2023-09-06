@@ -39,19 +39,19 @@ def big_dt(
     output_upper_bound = upper_bound - num_states - 1
     data = list(zip(input_data, (t.possible_actions for t in trace)))
 
-    output_dt = dt_infer(preds, data, output_upper_bound)
-    if output_dt is None: return None
+    output_dts = dt_infer(preds, data, output_upper_bound)
+    if len(output_dts) == 0: return []
 
     # Second DT learning problem: next state
-    next_state_upper_bound = upper_bound - output_dt.size
+    next_state_upper_bound = upper_bound - output_dts[0].size
     data = list(zip(input_data,
         ({states[i+1], 'stay put'} if states[i] == states[i+1] else {states[i+1]}
          for i in range(len(trace)))))
 
-    next_state_dt = dt_infer(preds, data, next_state_upper_bound)
-    if next_state_dt is None: return None
+    next_state_dts = dt_infer(preds, data, next_state_upper_bound)
+    if len(next_state_dts) == 0: return []
 
-    return BigDT(num_states, output_dt, next_state_dt)
+    return [BigDT(num_states, a, b) for a in output_dts for b in next_state_dts]
 
 if __name__ == '__main__':
     trace = read_trace('gravity_i', 5)[2:]
