@@ -1,15 +1,21 @@
 from typing import *
+from dataclasses import dataclass
 import functools, itertools, math
 
 from read_trace import read_trace, Transition
-from big_dt import big_dt
+import dt_inference
+from dt_inference import DT, Observation
+
 from z3 import *
+
+
+###### SMT enumeration
 
 def fixed_num_states_encode(
         trace: list[Transition], max_states: int
-        ) -> Tuple[Solver, Optional[list[int]]]:
+        ) -> Tuple[Solver, list[Int]]:
     '''
-    Returns a solver and a list of N+1 integer state IDs
+    Returns a solver and a list of N+1 SMT variables for the integer state IDs
     '''
     s = Solver()
     N = len(trace)
@@ -52,7 +58,7 @@ def fixed_num_states_encode(
 
     return s, states
 
-def solve_all(trace: list[Transition]) -> Iterator[list[int]]:
+def smt_enumerate(trace: list[Transition]) -> Iterator[list[int]]:
     '''
     An iterator of all minimal automata
     '''
@@ -71,11 +77,69 @@ def solve_all(trace: list[Transition]) -> Iterator[list[int]]:
         yield assignment
         s.add(Or(*(st != val for st, val in zip(states, assignment))))
 
+
+###### Constructing an overall "big decision tree"
+
+@dataclass
+class BigDT:
+    num_states: int
+    output_dt: DT
+    next_state_dt: DT
+
+    def size(self) -> int:
+        return self.output_dt.size + self.next_state_dt.size
+    def debug_print(self, prefix=''):
+        print(f'{prefix}There are {self.num_states} states and {self.size()} decision tree nodes')
+        print(f'{prefix}Output decision tree:')
+        self.output_dt.debug_print(prefix=prefix+'  ')
+        print(f'{prefix}Next state decision tree:')
+        self.next_state_dt.debug_print(prefix=prefix+'  ')
+
+def big_dt(
+        trace: list[Transition],
+        num_states: int,
+        states: list[int],
+        upper_bound = math.inf):
+    preds = {f'pred_{i}': 2 for i in range(len(trace[0].bits))}
+    preds['state'] = num_states
+
+    input_data = \
+        [ {f'pred_{i}': p for i, p in enumerate(t.bits)} | {'state': states[i]}
+        for i, t in enumerate(trace) ]
+
+    # First DT learning problem: output
+    # The next state DT is lower-bounded by the number of states, plus one for
+    # staying put
+    # FIXME (Mark 9/2/23): am I sure that there will always necessarily be a
+    # "stay in the same state" output in the next state DT?
+    output_upper_bound = upper_bound - num_states - 1
+    data = [Observation(i, data, t.possible_actions)
+            for i, (data, t) in enumerate(zip(input_data, trace))]
+
+    output_dt = dt_inference.branch_and_bound(preds, data, output_upper_bound)
+    if output_dt is None: return None
+
+    # Second DT learning problem: next state
+    next_state_upper_bound = upper_bound - output_dt.size
+    data = [Observation(i, data, {states[i+1], 'stay put'} if states[i] == states[i+1] else {states[i+1]})
+            for i, data in enumerate(input_data)]
+
+    next_state_dt = dt_inference.branch_and_bound(preds, data, next_state_upper_bound)
+    if next_state_dt is None: return None
+
+    return BigDT(num_states, output_dt, next_state_dt)
+
+
+###### Putting it all together
+
+# TODO
+
+
 if __name__ == '__main__':
     import time
     trace = read_trace('gravity_i', 5)[2:]
 
-    state_assignments = list(solve_all(trace))
+    state_assignments = list(smt_enumerate(trace))
 
     overall_start = time.time()
     COUNT = 100
