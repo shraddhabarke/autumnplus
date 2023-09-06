@@ -133,7 +133,7 @@ def entropy_eusolver(obs: ObsTable) -> float:
 
 ####### Branch and bound
 
-def lower_bound_on_dt_size(obs: ObsTable, lo: int, hi: int) -> int:
+def lower_bound_on_dt_size(obs: ObsTable, lo: int, hi: int, upper_bound = math.inf) -> int:
     '''
     Return a lower bound on the size of a decision tree needed to cover
     obs[lo:hi]
@@ -177,6 +177,8 @@ def lower_bound_on_dt_size(obs: ObsTable, lo: int, hi: int) -> int:
                 num_representatives += 1
                 labels_used.update(o.out)
                 o.used = True
+                if num_representatives >= upper_bound:
+                    return num_representatives
 
     return num_representatives
 
@@ -277,6 +279,44 @@ def branch_and_bound(
 
         best_so_far: DT | None = None
 
+        def try_branching_on_pred(pred: str):
+            nonlocal best_so_far
+            nonlocal upper_bound
+
+            # Sort the range on that predicate
+            endpts: list[int] = []
+            sort_range_pred_vals(obs, lo, hi, pred, 0, preds[pred], endpts)
+
+            # Compute lower bounds
+            lo_ = lo
+            bounds: list[int] = []
+            slack = upper_bound
+            for hi_ in endpts:
+                lower_bound = lower_bound_on_dt_size(obs, lo_, hi_, upper_bound = slack)
+                bounds.append(lower_bound)
+                slack -= lower_bound
+                if slack <= 0: return
+                lo_ = hi_
+            assert lo_ == hi
+
+            # Recurse on each range
+            size_so_far = 0
+            children: list[DT] = []
+            lo_ = lo
+            for i, hi_ in enumerate(endpts):
+                result = go(depth + 1, upper_bound - size_so_far - sum(bounds[i+1:]), lo_, hi_)
+                if result is None:
+                    return
+                size_so_far += result.size
+                children.append(result)
+                lo_ = hi_
+
+            # Assemble into overall solutions
+            assert lo_ == hi
+            assert size_so_far < upper_bound
+            best_so_far = DTBranch(pred, tuple(children))
+            upper_bound = size_so_far
+
         # Pick a predicate from predicate list
         for pred_index in range(depth, len(pred_list)):
             pred = pred_list[pred_index]
@@ -289,37 +329,7 @@ def branch_and_bound(
             assert not branched_on_so_far[pred]
             branched_on_so_far[pred] = True
 
-            # Sort the range on that predicate
-            endpts: list[int] = []
-            sort_range_pred_vals(obs, lo, hi, pred, 0, preds[pred], endpts)
-
-            # Compute lower bounds
-            lo_ = lo
-            bounds: list[int] = []
-            for hi_ in endpts:
-                bounds.append(lower_bound_on_dt_size(obs, lo_, hi_))
-                lo_ = hi_
-            assert lo_ == hi
-
-            # Recurse on each range
-            size_so_far = 0
-            children: list[DT] = []
-            lo_ = lo
-            for i, hi_ in enumerate(endpts):
-                result = go(depth + 1, upper_bound - size_so_far - sum(bounds[i+1:]), lo_, hi_)
-                if result is None:
-                    children = None
-                    break
-                size_so_far += result.size
-                children.append(result)
-                lo_ = hi_
-
-            # Assemble into overall solutions
-            if children is not None:
-                assert lo_ == hi
-                assert size_so_far < upper_bound
-                best_so_far = DTBranch(pred, tuple(children))
-                upper_bound = size_so_far
+            try_branching_on_pred(pred)
 
             branched_on_so_far[pred] = False
             pred_list[depth], pred_list[pred_index] = pred_list[pred_index], pred
@@ -327,7 +337,7 @@ def branch_and_bound(
         return best_so_far
 
     if upper_bound < math.inf:
-        lower_bound = lower_bound_on_dt_size(obs, 0, len(obs))
+        lower_bound = lower_bound_on_dt_size(obs, 0, len(obs), upper_bound)
         if lower_bound >= upper_bound:
             return None
     heuristic_best = heuristic_infer(preds, obs)
