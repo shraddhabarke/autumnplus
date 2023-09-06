@@ -9,7 +9,7 @@ heuristic, as described in:
 
 Input:
  - a description of the predicates {name: number of possible values}
- - a list of obs ({predicate name: value}, {set of possible results})
+ - a list of observations ({predicate name: value}, {set of possible results})
 '''
 
 from typing import *
@@ -141,16 +141,7 @@ def lower_bound_on_dt_size(obs: ObsTable, lo: int, hi: int) -> int:
     # The size of a decision tree is the number of leaf nodes
     # This is lower bounded by the size of a minimal covering set of labels
     # So we need to compute a set cover lower bound
-
-    return set_cover_lower_bound(obs[i].out for i in range(lo, hi))
-
-def set_cover_lower_bound(items: Iterable[set[str]]) -> int:
-    '''
-    Set cover: at least one label (string) from each set must be selected.
-    What's the fewest number of labels you can select?
-
-    This function returns a *lower bound* on the number of labels needed.
-    '''
+    #
     # Set Cover Lower Bound:
     # pick a set of representative examples s.t. each label only works for at
     # most one representative example
@@ -162,17 +153,30 @@ def set_cover_lower_bound(items: Iterable[set[str]]) -> int:
     # This is a simplification of the LP-relaxation dual-fitting-based lower
     # bound algorithm from Vazirani, "Approximation algorithms", ch. 13
 
-    size_to_labels = defaultdict(lambda: [])
-    for labels in items:
-        size_to_labels[len(labels)].append(labels)
+    # Move already used variables to the front
+    # This makes the minimal sets for counterexamples smaller
+    a, b = lo, hi
+    while a < b:
+        while a < b and obs[a].used:
+            a += 1
+        while a < b and not obs[b-1].used:
+            b -= 1
+        if a < b:
+            obs[a], obs[b-1] = obs[b-1], obs[a]
+
+    size_to_obs = defaultdict(lambda: [])
+    for i in range(lo, hi):
+        o = obs[i]
+        size_to_obs[len(o.out)].append(o)
 
     labels_used = set()
     num_representatives = 0
-    for size in sorted(size_to_labels.keys()):
-        for labels in size_to_labels[size]:
-            if all(l not in labels_used for l in labels):
+    for size in sorted(size_to_obs.keys()):
+        for o in size_to_obs[size]:
+            if all(l not in labels_used for l in o.out):
                 num_representatives += 1
-                labels_used.update(labels)
+                labels_used.update(o.out)
+                o.used = True
 
     return num_representatives
 
@@ -367,7 +371,6 @@ def sort_range_pred_vals(
     sort_range_pred_vals(obs, mid, hi, pred, pred_mid, pred_hi, endpts)
 
 
-
 if __name__ == '__main__':
     # Example from the 1986 paper
     preds = {'outlook': 3, 'temp': 3, 'humidity': 2, 'windy': 2}
@@ -391,7 +394,17 @@ if __name__ == '__main__':
     dt = heuristic_infer(preds, obs)
     dt.debug_print()
 
+    # The smallest decision tree
     dt = branch_and_bound(preds, obs)
     assert dt is not None
-    dt.debug_print()
+
+    # Cannot find a decision tree smaller than the smallest one
+    assert branch_and_bound(preds, obs, upper_bound = dt.size) is None
+    used = [o for o in obs if o.used]
+    print(f'There are {len(obs)} many observations but only {len(used)} were used')
+
+    # `used` is an "UNSAT core" of core observations used to prove there's no
+    # decision tree smaller than that
+    assert branch_and_bound(preds, used, upper_bound = dt.size) is None
+
 
