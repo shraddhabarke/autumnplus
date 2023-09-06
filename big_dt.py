@@ -1,6 +1,6 @@
 from read_trace import read_trace, Transition
 from smt_encoding import solve as smt_solve
-from dt_inference import DT, branch_and_bound as dt_infer
+from dt_inference import DT, Observation, branch_and_bound as dt_infer
 from dataclasses import dataclass
 import math
 
@@ -37,16 +37,16 @@ def big_dt(
     # FIXME (Mark 9/2/23): am I sure that there will always necessarily be a
     # "stay in the same state" output in the next state DT?
     output_upper_bound = upper_bound - num_states - 1
-    data = list(zip(input_data, (t.possible_actions for t in trace)))
+    data = [Observation(i, data, t.possible_actions)
+            for i, (data, t) in enumerate(zip(input_data, trace))]
 
     output_dt = dt_infer(preds, data, output_upper_bound)
     if output_dt is None: return None
 
     # Second DT learning problem: next state
     next_state_upper_bound = upper_bound - output_dt.size
-    data = list(zip(input_data,
-        ({states[i+1], 'stay put'} if states[i] == states[i+1] else {states[i+1]}
-         for i in range(len(trace)))))
+    data = [Observation(i, data, {states[i+1], 'stay put'} if states[i] == states[i+1] else {states[i+1]})
+            for i, data in enumerate(input_data)]
 
     next_state_dt = dt_infer(preds, data, next_state_upper_bound)
     if next_state_dt is None: return None

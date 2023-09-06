@@ -59,7 +59,14 @@ class DTUnreachable(DT):
         print(f'{prefix}UNREACHABLE (no data)')
 
 
-ObsTable = list[tuple[dict[str, int], set[str]]]
+@dataclass(slots=True)
+class Observation:
+    id: int
+    data: dict[str, int]
+    out: set[str]
+    used: bool = False
+
+ObsTable = list[Observation]
 
 
 ###### Pure heuristic search with the information gain heuristic
@@ -70,7 +77,7 @@ def heuristic_infer(preds: dict[str, int], obs: ObsTable) -> DT:
         return DTUnreachable()
 
     # Base case: look for a common output value
-    common = functools.reduce(operator.and_, (out for data, out in obs))
+    common = functools.reduce(operator.and_, (o.out for o in obs))
     if len(common) > 0:
         return DTLeaf(common)
 
@@ -88,8 +95,8 @@ def heuristic_infer(preds: dict[str, int], obs: ObsTable) -> DT:
 
 def split(obs: ObsTable, pred: str, num_values: int) -> list[ObsTable]:
     partition = [[] for i in range(num_values)]
-    for data, out in obs:
-        partition[data[pred]].append((data, out))
+    for o in obs:
+        partition[o.data[pred]].append(o)
     return partition
 
 def entropy_simple(obs: ObsTable) -> float:
@@ -98,9 +105,9 @@ def entropy_simple(obs: ObsTable) -> float:
     distribution
     '''
     count = Counter()
-    for data, out in obs:
-        for t in out:
-            count[t] += 1/len(out)
+    for o in obs:
+        for t in o.out:
+            count[t] += 1/len(o.out)
     N = len(obs)
     return N * sum(- n/N * math.log(n/N) for n in count.values())
 
@@ -112,13 +119,13 @@ def entropy_eusolver(obs: ObsTable) -> float:
     This is (equivalent to) what EUSolver does. I don't get it but it works
     '''
     cover_size = Counter()
-    for data, out in obs:
-        for t in out:
+    for o in obs:
+        for t in o.out:
             cover_size[t] += 1
     count = Counter()
-    for data, out in obs:
-        denom = sum(cover_size[t] for t in out)
-        for t in out:
+    for o in obs:
+        denom = sum(cover_size[t] for t in o.out)
+        for t in o.out:
             count[t] += cover_size[t] / denom
     total = len(obs)
     return total * sum(- n/total * math.log(n/total) for n in count.values())
@@ -135,7 +142,7 @@ def lower_bound_on_dt_size(obs: ObsTable, lo: int, hi: int) -> int:
     # This is lower bounded by the size of a minimal covering set of labels
     # So we need to compute a set cover lower bound
 
-    return set_cover_lower_bound(obs[i][1] for i in range(lo, hi))
+    return set_cover_lower_bound(obs[i].out for i in range(lo, hi))
 
 def set_cover_lower_bound(items: Iterable[set[str]]) -> int:
     '''
@@ -177,8 +184,8 @@ def remove_irrelevant_predicates(preds: dict[str, int], obs: ObsTable):
         preds.clear(); return
 
     for pred in list(preds.keys()):
-        value = obs[0][0][pred]
-        if all(p[pred] == value for p, __ in obs):
+        value = obs[0].data[pred]
+        if all(o.data[pred] == value for o in obs):
             del preds[pred]
 
 def find_dependent_predicates(
@@ -206,9 +213,9 @@ def find_dependent_predicates(
         # Partition obs on pred
         lo, hi = 0, len(obs)
         while lo < hi:
-            while lo < hi and obs[lo][0][pred] == 0:
+            while lo < hi and obs[lo].data[pred] == 0:
                 lo += 1
-            while lo < hi and obs[hi-1][0][pred] == 1:
+            while lo < hi and obs[hi-1].data[pred] == 1:
                 hi -= 1
             if lo < hi:
                 obs[lo], obs[hi-1] = obs[hi-1], obs[lo]
@@ -220,13 +227,13 @@ def find_dependent_predicates(
 
         # Find predicates constant on one of the halves
         for pred2 in pred_list[:i]:
-            val = obs[0][0][pred2]
-            if all(obs[j][0][pred2] == val for j in range(mid)):
+            val = obs[0].data[pred2]
+            if all(obs[j].data[pred2] == val for j in range(mid)):
                 result[pred2].append(pred)
                 continue
 
-            val = obs[mid][0][pred2]
-            if all(obs[j][0][pred2] == val for j in range(mid, len(obs))):
+            val = obs[mid].data[pred2]
+            if all(obs[j].data[pred2] == val for j in range(mid, len(obs))):
                 result[pred2].append(pred)
 
     return result
@@ -260,7 +267,7 @@ def branch_and_bound(
             return DTUnreachable()
 
         # Base case: look for a common output value
-        common = functools.reduce(operator.and_, (obs[i][1] for i in range(lo, hi)))
+        common = functools.reduce(operator.and_, (obs[i].out for i in range(lo, hi)))
         if len(common) > 0:
             return DTLeaf(common)
 
@@ -346,9 +353,9 @@ def sort_range_pred_vals(
     a = lo
     b = hi
     while a < b:
-        while a < b and obs[a][0][pred] < pred_mid:
+        while a < b and obs[a].data[pred] < pred_mid:
             a += 1
-        while a < b and obs[b-1][0][pred] >= pred_mid:
+        while a < b and obs[b-1].data[pred] >= pred_mid:
             b -= 1
         if a < b:
             obs[a], obs[b-1] = obs[b-1], obs[a]
@@ -364,7 +371,7 @@ def sort_range_pred_vals(
 if __name__ == '__main__':
     # Example from the 1986 paper
     preds = {'outlook': 3, 'temp': 3, 'humidity': 2, 'windy': 2}
-    obs = [(dict(zip(['outlook', 'temp', 'humidity', 'windy'], data)), {out})
+    obs = [Observation(0, dict(zip(['outlook', 'temp', 'humidity', 'windy'], data)), {out})
            for *data, out in [
                (0, 2, 1, 0, 'N'),
                (0, 2, 1, 1, 'N'),
