@@ -15,7 +15,7 @@ Input:
 from typing import *
 from dataclasses import dataclass, field
 from collections import Counter, defaultdict
-import functools, itertools, operator, math, copy
+import functools, itertools, operator, math
 
 ###### Decision trees
 
@@ -247,6 +247,8 @@ def find_dependent_predicates(
 def branch_and_bound(
         preds: dict[str, int], obs: ObsTable, upper_bound = math.inf
         ) -> DT | None:
+    preds = preds.copy()
+    obs = obs.copy()
     remove_irrelevant_predicates(preds, obs)
     pred_list = list(preds.keys())
 

@@ -113,51 +113,72 @@ def big_dt(
     # FIXME (Mark 9/2/23): am I sure that there will always necessarily be a
     # "stay in the same state" output in the next state DT?
     output_upper_bound = upper_bound - num_states - 1
-    data = [Observation(i, data, t.possible_actions)
-            for i, (data, t) in enumerate(zip(input_data, trace))]
+    output_obs = [Observation(i, data, t.possible_actions)
+                  for i, (data, t) in enumerate(zip(input_data, trace))]
 
-    output_dt = dt_inference.branch_and_bound(preds, data, output_upper_bound)
-    if output_dt is None: return None
+    output_dt = dt_inference.branch_and_bound(preds, output_obs, output_upper_bound)
+    used = {o.id for o in output_obs if o.used}
+    if output_dt is None:
+        return None, used
 
     # Second DT learning problem: next state
     next_state_upper_bound = upper_bound - output_dt.size
-    data = [Observation(i, data, {states[i+1], 'stay put'} if states[i] == states[i+1] else {states[i+1]})
-            for i, data in enumerate(input_data)]
+    next_state_obs = [Observation(i, data, {states[i+1], 'stay put'} if
+                                  states[i] == states[i+1] else {states[i+1]})
+                      for i, data in enumerate(input_data)]
 
-    next_state_dt = dt_inference.branch_and_bound(preds, data, next_state_upper_bound)
-    if next_state_dt is None: return None
+    next_state_dt = \
+        dt_inference.branch_and_bound(preds, next_state_obs, next_state_upper_bound)
+    used |= {i for o in next_state_obs if o.used for i in (o.id, o.id+1)}
+    if next_state_dt is None:
+        return None, used
 
-    return BigDT(num_states, output_dt, next_state_dt)
+    return BigDT(num_states, output_dt, next_state_dt), used
 
 
 ###### Putting it all together
 
-# TODO
+def cegar_ish_thing(trace: list[Transition]) -> BigDT:
+    # Find the least number of states needed
+    for num_states in itertools.count(1):
+        s, states = fixed_num_states_encode(trace, num_states)
+        if s.check() == sat:
+            break
 
+    print(f'There are {num_states} states')
 
-if __name__ == '__main__':
-    import time
-    trace = read_trace('gravity_i', 5)[2:]
+    best = None
+    best_size = math.inf
 
-    state_assignments = list(smt_enumerate(trace))
+    # Enumerate all models
+    counter = 0
+    while s.check() == sat:
+        model = s.model()
+        assignment = [model[st].as_long() for st in states]
 
-    overall_start = time.time()
-    COUNT = 100
-    for i in range(COUNT):
-        start = time.time()
-        best = None
-        best_size = math.inf
-        for s in state_assignments:
-            num_states = max(s) + 1
-
-            dt = big_dt(trace, num_states, s, upper_bound = best_size)
-            if dt is None: continue
+        counter += 1
+        dt, used = big_dt(trace, num_states, assignment, upper_bound = best_size)
+        if dt is not None:
             assert dt.size() < best_size
             best = dt
             best_size = dt.size()
-        duration = time.time() - start
-        print(f'This iteration took {duration} secs')
-    print(f'The average time was {(time.time() - overall_start)/COUNT}')
 
+        # Report the counterexample clause based on which states were used in
+        # proving the lower bound
+        print(f'SMT clause contains {len(used)} out of {len(assignment)} state variables')
+        s.add(Or(*(states[i] != assignment[i] for i in used)))
+
+    print(f'Overall, enumerated {counter} state assignments')
+    return best
+
+if __name__ == '__main__':
+    import time
+    # trace = read_trace('gravity_i', 5)[2:]
+    trace = read_trace('count_4', 1)
+
+    best = cegar_ish_thing(trace)
     best.debug_print()
+
+    # state_assignments = list(smt_enumerate(trace))
+    # print(f'There are {len(state_assignments)} possible state assignments total')
 
