@@ -108,18 +108,20 @@ def gen_constraints(ss: SolverState, trace: list[Transition], max_lines: int):
         if frame_bv == 0:
             s.add(states[i] == states[i+1])
 
+    # Symmetry breaking constraints:
 
     # Line #0 is always "stay" (optional)
     s.add(line_fn(0) == LineType.State(-1))
-    
-
+    # The next K lines are all different actions:
+    for j in range(K):
+        s.add(line_fn(j+1) == LineType.Action(j))
 
 def solve(trace: list[Transition]):
     ss = SolverState()
     ss.init(trace)
 
     for max_lines in itertools.count(2):
-        if max_lines > 8: break
+        if max_lines > 20: break
 
         print("Trying max_lines =", max_lines)
         ss.solver.push() # save the current state of the solver
@@ -132,7 +134,7 @@ def solve(trace: list[Transition]):
             return ss.solver.model()
 
 if __name__ == '__main__':
-    trace = read_trace('test_', 1)#[1:]
+    trace = read_trace('test_', 1)
     print("Trace:", trace)
     model = solve(trace)
     print(model)
