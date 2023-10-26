@@ -11,7 +11,7 @@ def bits_to_bv(bits):
 # A class to store the solver and type declarations:
 class SolverState:
     def init(self, trace):
-        self.solver = Optimize()
+        self.solver = Solver()
         self.action_ids = {}
         for t in trace:
             for a in t.possible_actions:
@@ -45,10 +45,13 @@ def gen_constraints(ss: SolverState, trace: list[Transition], max_lines: int):
     s, LineType, left_child, right_child, line_fn, line_val, states, preds, action_ids, N, K = \
         ss.solver, ss.LineType, ss.left_child, ss.right_child, ss.line_fn, ss.line_val, ss.states, ss.preds, ss.action_ids, ss.N, ss.K
     
-    # the state in each frame should be non-negative, so that we can use negative states as "stay"
-    for i in range(N):
-        s.add(states[i + 1] >= 0)
-    # the very first state is zero (without loss of generality)
+    # Structural constraints on states
+    for i in range(N+1):
+        # States are non-negative
+        s.add(states[i] >= 0)
+        # If current state is n > 0, then one of the previous states is n-1 (optional; makes states consecutive)
+        # s.add(Implies(states[i] > 0, Or([states[j] == states[i] - 1 for j in range(i)])))
+    # the very first state is zero (without loss of generality); optional
     s.add(states[0] == 0)
 
     # structural constraints for decision trees
@@ -93,25 +96,22 @@ def gen_constraints(ss: SolverState, trace: list[Transition], max_lines: int):
     for i in range(N):
         frame_bv = bits_to_bv(trace[i].bits)
         possible_actions = [action_ids[a] for a in trace[i].possible_actions]
-        # Top Action - action_val could belong to one of the possible actions
+        # Top Action is one of the possible actions
         s.add(And(LineType.is_Action(line_val(action_root, frame_bv, states[i])),
               Or([LineType.action_val(line_val(action_root, frame_bv, states[i])) == action for action in possible_actions])))
 
-        # Top State
+        # Top State is the current state
         s.add(And(LineType.is_State(line_val(state_root, frame_bv, states[i])),
             LineType.state_val(line_val(state_root, frame_bv, states[i])) == states[i+1]))
+        
+        # If no events happened, then the state should stay the same
+        if frame_bv == 0:
+            s.add(states[i] == states[i+1])
 
-    # Bias towards stay:
 
-    # Line #0 is always "stay" (the DT gets this transition for free)
-    # hence the simplest possible DT has two lines: 
-    # 0 is stay and the root of the transition function
-    # 1 is some action that always happens and the root of the output function
+    # Line #0 is always "stay" (optional)
     s.add(line_fn(0) == LineType.State(-1))
-
-    # Add soft constraints that state should remain the same between each pair of frames:
-    for i in range(N):
-        s.add_soft(states[i] == states[i+1], 1)
+    
 
 
 def solve(trace: list[Transition]):
