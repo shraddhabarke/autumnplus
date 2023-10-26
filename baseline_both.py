@@ -50,27 +50,23 @@ def declare(trace, max_lines):
 
     for j in range(0, max_lines):
         for i in range(N):
-            line = line_fn(j)
-            is_action_condition = LineType.is_Action(line)
-            is_state_condition = LineType.is_State(line)
-            is_branchpred_condition = LineType.is_BranchPred(line)
-            is_branchstate_condition = LineType.is_BranchState(line)
-            branch_pred = LineType.branch_pred(line)
-            branch_state = LineType.branch_state(line)
+            line = line_fn(j)            
             frame_bv = bits_to_bv(trace[i].bits)
 
-            s.add(Implies(is_action_condition, line_val(j, frame_bv, states[i]) == line_fn(j)))
-            s.add(Implies(is_state_condition, line_val(j, frame_bv, states[i]) == line_fn(j)))
+            s.add(Implies(LineType.is_Action(line), line_val(j, frame_bv, states[i]) == line_fn(j)))
+            s.add(Implies(LineType.is_State(line), line_val(j, frame_bv, states[i]) == line_fn(j)))
 
             for idx in range(preds): # evaluating all possible predicates
-                s.add(Implies(And(is_branchpred_condition, branch_pred == idx, Extract(idx, idx, frame_bv) == 1),
+                if trace[i].bits[idx]:
+                    s.add(Implies(And(LineType.is_BranchPred(line), LineType.branch_pred(line) == idx),
                           line_val(j, frame_bv, states[i]) == line_val(left_child(j), frame_bv, states[i])))
-                s.add(Implies(And(is_branchpred_condition, branch_pred == idx, Extract(idx, idx, frame_bv) == 0),
+                else:
+                    s.add(Implies(And(LineType.is_BranchPred(line), LineType.branch_pred(line) == idx),
                           line_val(j, frame_bv, states[i]) == line_val(right_child(j), frame_bv, states[i])))
                 
-            s.add(Implies(is_branchstate_condition,
+            s.add(Implies(LineType.is_BranchState(line),
                           line_val(j, frame_bv, states[i]) == 
-                              If(states[i] == branch_state, 
+                              If(states[i] == LineType.branch_state(line), 
                                  line_val(left_child(j), frame_bv, states[i]), 
                                  line_val(right_child(j), frame_bv, states[i]))))
 
@@ -97,6 +93,7 @@ def solve(trace: list[Transition]):
     for max_lines in itertools.count(2):
         if max_lines > 20: break
         solver, model = declare(trace, max_lines)
+        # print(solver)
         if model is not None: return model
 
 if __name__ == '__main__':
