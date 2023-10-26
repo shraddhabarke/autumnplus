@@ -11,7 +11,7 @@ def bits_to_bv(bits):
 # A class to store the solver and type declarations:
 class SolverState:
     def init(self, trace):
-        self.solver = Solver()
+        self.solver = Optimize()
         self.action_ids = {}
         for t in trace:
             for a in t.possible_actions:
@@ -44,6 +44,12 @@ def gen_constraints(ss: SolverState, trace: list[Transition], max_lines: int):
 
     s, LineType, left_child, right_child, line_fn, line_val, states, preds, action_ids, N, K = \
         ss.solver, ss.LineType, ss.left_child, ss.right_child, ss.line_fn, ss.line_val, ss.states, ss.preds, ss.action_ids, ss.N, ss.K
+    
+    # the state in each frame should be non-negative, so that we can use negative states as "stay"
+    for i in range(N):
+        s.add(states[i + 1] >= 0)
+    # the very first state is zero (without loss of generality)
+    s.add(states[0] == 0)
 
     # structural constraints for decision trees
     for j in range(max_lines):
@@ -54,13 +60,18 @@ def gen_constraints(ss: SolverState, trace: list[Transition], max_lines: int):
         s.add(Implies(Or(LineType.is_BranchPred(line), LineType.is_BranchState(line)),
             And(And(0 <= left_child(j), left_child(j) < j), And(0 <= right_child(j), right_child(j) < j))))
 
+    # semantics of the decision tree
     for j in range(0, max_lines):
         for i in range(N):
             line = line_fn(j)            
             frame_bv = bits_to_bv(trace[i].bits)
 
+            # If the line is an action, its value it itself
             s.add(Implies(LineType.is_Action(line), line_val(j, frame_bv, states[i]) == line_fn(j)))
-            s.add(Implies(LineType.is_State(line), line_val(j, frame_bv, states[i]) == line_fn(j)))
+
+            # If the line is a state assignment, its value is itself, unless it's negative (interpreted as stay)
+            s.add(Implies(LineType.is_State(line), 
+                line_val(j, frame_bv, states[i]) == If(LineType.state_val(line_fn(j)) < 0, LineType.State(states[i]), line_fn(j))))
 
             for idx in range(preds): # evaluating all possible predicates
                 if trace[i].bits[idx]:
@@ -77,28 +88,43 @@ def gen_constraints(ss: SolverState, trace: list[Transition], max_lines: int):
                                  line_val(right_child(j), frame_bv, states[i]))))
 
     # evaluate correctly
+    action_root = max_lines - 1
+    state_root = max_lines - 2
     for i in range(N):
         frame_bv = bits_to_bv(trace[i].bits)
         possible_actions = [action_ids[a] for a in trace[i].possible_actions]
         # Top Action - action_val could belong to one of the possible actions
-        s.add(And(LineType.is_Action(line_val(max_lines - 2, frame_bv, states[i])),
-        Or([LineType.action_val(line_val(max_lines - 2, frame_bv, states[i])) ==
-            action for action in possible_actions])))
+        s.add(And(LineType.is_Action(line_val(action_root, frame_bv, states[i])),
+              Or([LineType.action_val(line_val(action_root, frame_bv, states[i])) == action for action in possible_actions])))
 
         # Top State
-        s.add(And(LineType.is_State(line_val(max_lines - 1, frame_bv, states[i])),
-            LineType.state_val(line_val(max_lines - 1, frame_bv, states[i])) == states[i+1]))
+        s.add(And(LineType.is_State(line_val(state_root, frame_bv, states[i])),
+            LineType.state_val(line_val(state_root, frame_bv, states[i])) == states[i+1]))
+
+    # Bias towards stay:
+
+    # Line #0 is always "stay" (the DT gets this transition for free)
+    # hence the simplest possible DT has two lines: 
+    # 0 is stay and the root of the transition function
+    # 1 is some action that always happens and the root of the output function
+    s.add(line_fn(0) == LineType.State(-1))
+
+    # Add soft constraints that state should remain the same between each pair of frames:
+    for i in range(N):
+        s.add_soft(states[i] == states[i+1], 1)
+
 
 def solve(trace: list[Transition]):
     ss = SolverState()
     ss.init(trace)
 
     for max_lines in itertools.count(2):
-        if max_lines > 20: break
+        if max_lines > 8: break
 
         print("Trying max_lines =", max_lines)
         ss.solver.push() # save the current state of the solver
         gen_constraints(ss, trace, max_lines)
+        # print(ss.solver)
         if ss.solver.check() == unsat:
             print("UNSAT")
             ss.solver.pop()
