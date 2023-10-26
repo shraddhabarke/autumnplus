@@ -8,36 +8,42 @@ def bits_to_bv(bits):
     #print("Int-Val:", [1 << i for i, bit in enumerate(bits) if bit])
     return BitVecVal(int_val, len(bits))
 
-def declare(trace, max_lines):
-    s = Solver()
-    action_ids = {}
-    for t in trace:
-        for a in t.possible_actions:
-            if a not in action_ids:
-                action_ids[a] = len(action_ids)
+# A class to store the solver and type declarations:
+class SolverState:
+    def init(self, trace):
+        self.solver = Solver()
+        self.action_ids = {}
+        for t in trace:
+            for a in t.possible_actions:
+                if a not in self.action_ids:
+                    self.action_ids[a] = len(self.action_ids)
 
-    N, preds = len(trace), len(trace[0].bits) # number of frames # number of predicates
-    Pred = BitVecSort(len(trace[0].bits))
-    K = len(action_ids.keys()) # number of all possible actions 
-    states = [Int(f'state_{i}') for i in range(N+1)]
+        self.N, self.preds = len(trace), len(trace[0].bits) # number of frames # number of predicates
+        self.Pred = BitVecSort(len(trace[0].bits))
+        self.K = len(self.action_ids.keys()) # number of all possible actions 
+        self.states = [Int(f'state_{i}') for i in range(self.N+1)]
 
-    # line can either correspond to action or state; and can be split on predicates or states. 
-    # Children are always one of the possible lines!
-    LineType = Datatype('LineType')
-    LineType.declare('Action', ('action_val', IntSort()))
-    LineType.declare('State', ('state_val', IntSort()))
-    LineType.declare('BranchPred', ('branch_pred', IntSort())) # splits on state
-    LineType.declare('BranchState', ('branch_state', IntSort()))
-    LineType = LineType.create()
+        # line can either correspond to action or state; and can be split on predicates or states. 
+        # Children are always one of the possible lines!
+        self.LineType = Datatype('LineType')
+        self.LineType.declare('Action', ('action_val', IntSort()))
+        self.LineType.declare('State', ('state_val', IntSort()))
+        self.LineType.declare('BranchPred', ('branch_pred', IntSort())) # splits on state
+        self.LineType.declare('BranchState', ('branch_state', IntSort()))
+        self.LineType = self.LineType.create()
 
-    # uninterpreted functions
-    line_fn = Function('line_fn', IntSort(), LineType)
-    left_child = Function('left_child', IntSort(), IntSort())
-    right_child = Function('right_child', IntSort(), IntSort())
-    line_val = Function('line_val', IntSort(), Pred, IntSort(), LineType)
+        # uninterpreted functions
+        self.line_fn = Function('line_fn', IntSort(), self.LineType)
+        self.left_child = Function('left_child', IntSort(), IntSort())
+        self.right_child = Function('right_child', IntSort(), IntSort())
+        self.line_val = Function('line_val', IntSort(), self.Pred, IntSort(), self.LineType)
 
-    #line_val(line_number, predicate, state, LineType)
-    #line_val(line_num, frame) ∈ {possible actions in frame}
+
+def gen_constraints(ss: SolverState, trace: list[Transition], max_lines: int):
+    '''Add constraints to the solver in ss that would produce the trace using a program with max_lines lines.'''
+
+    s, LineType, left_child, right_child, line_fn, line_val, states, preds, action_ids, N, K = \
+        ss.solver, ss.LineType, ss.left_child, ss.right_child, ss.line_fn, ss.line_val, ss.states, ss.preds, ss.action_ids, ss.N, ss.K
 
     # structural constraints for decision trees
     for j in range(max_lines):
@@ -83,18 +89,21 @@ def declare(trace, max_lines):
         s.add(And(LineType.is_State(line_val(max_lines - 1, frame_bv, states[i])),
             LineType.state_val(line_val(max_lines - 1, frame_bv, states[i])) == states[i+1]))
 
-    if s.check() == unsat:
-        print("unsat!")
-        return s, None
-    model = s.model()
-    return s, model
-
 def solve(trace: list[Transition]):
+    ss = SolverState()
+    ss.init(trace)
+
     for max_lines in itertools.count(2):
         if max_lines > 20: break
-        solver, model = declare(trace, max_lines)
-        # print(solver)
-        if model is not None: return model
+
+        print("Trying max_lines =", max_lines)
+        ss.solver.push() # save the current state of the solver
+        gen_constraints(ss, trace, max_lines)
+        if ss.solver.check() == unsat:
+            print("UNSAT")
+            ss.solver.pop()
+        else:
+            return ss.solver.model()
 
 if __name__ == '__main__':
     trace = read_trace('test_', 1)#[1:]
