@@ -1,0 +1,8 @@
+(clicked (prev addedObjType1List))|[0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0]
+"(clicked (filter (--> obj (== (.. obj color) ""darkorange"")) (prev addedObjType1List)))"|[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+"(clicked (filter (--> obj (== (.. obj color) ""red"")) (prev addedObjType1List)))"|[0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+(in true (map (--> obj (== (.. obj id) x)) (filter (--> obj (== (.. obj id) x)) (prev addedObjType2List))))|{'5': [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], '6': [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], '7': [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]}
+"(clicked (filter (--> obj (== (.. obj color) ""green"")) (prev addedObjType1List)))"|[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]
+"(clicked (filter (--> obj (== (.. obj color) ""gold"")) (prev addedObjType1List)))"|[0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+clicked|[1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0]
+(& clicked (isFree click))|[1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]

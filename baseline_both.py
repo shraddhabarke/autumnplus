@@ -1,7 +1,8 @@
 from typing import *
-import functools, itertools
 from read_trace import read_trace, Transition
 from z3 import *
+
+LINE_LIMIT = 20
 
 def bits_to_bv(bits):
     int_val = sum(1 << i for i, bit in enumerate(bits) if bit)
@@ -21,7 +22,7 @@ class SolverState:
         self.N, self.preds = len(trace), len(trace[0].bits) # number of frames # number of predicates
         self.Pred = BitVecSort(len(trace[0].bits))
         self.K = len(self.action_ids.keys()) # number of all possible actions 
-        self.states = [Int(f'state_{i}') for i in range(self.N+1)]
+        self.states = [Int(f'state_{i}') for i in range(self.N+1)]        
 
         # line can either correspond to action or state; and can be split on predicates or states. 
         # Children are always one of the possible lines!
@@ -116,22 +117,41 @@ def gen_constraints(ss: SolverState, trace: list[Transition], max_lines: int):
     for j in range(K):
         s.add(line_fn(j+1) == LineType.Action(j))
 
+def gen_state_constraints(ss: SolverState, num_states: int):
+    '''Add constraints that are specific to the number of states in the automaton.'''
+    # The next num_states lines after the action lines are all different states assignments:
+    for j in range(num_states):
+        ss.solver.add(ss.line_fn(ss.K+1+j) == ss.LineType.State(j))
+
+    for i in range(ss.N+1):
+        ss.solver.add(ss.states[i] < num_states)
+
+
 def solve(trace: list[Transition]):
     ss = SolverState()
     ss.init(trace)
 
-    for max_lines in itertools.count(2):
-        if max_lines > 20: break
-
-        print("Trying max_lines =", max_lines)
+    # Iterate over the size of the decisions tree
+    # (we start from 2 because we need at least one action and one state assignment)
+    for num_lines in range(2, LINE_LIMIT):
+        print("Trying max_lines =", num_lines)
         ss.solver.push() # save the current state of the solver
-        gen_constraints(ss, trace, max_lines)
-        # print(ss.solver)
-        if ss.solver.check() == unsat:
-            print("UNSAT")
-            ss.solver.pop()
-        else:
-            return ss.solver.model()
+        gen_constraints(ss, trace, num_lines)
+
+        # Iterate over the number of states in the automaton;
+        # (this makes things faster because we can fix all the state assignment lines)
+        max_states = num_lines - ss.K # We can't have more states than lines to put their assignments in
+        for num_states in range(1, max_states):
+            print("\tTrying num_states =", num_states)
+            ss.solver.push()
+            gen_state_constraints(ss, num_states)
+
+            if ss.solver.check() == unsat:
+                print("\tUNSAT")
+            else:
+                return ss.solver.model()
+            ss.solver.pop() # pop num-state-specific constraints
+        ss.solver.pop() # pop size-specific constraints
 
 if __name__ == '__main__':
     trace = read_trace('test_', 1)
